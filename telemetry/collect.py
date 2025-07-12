@@ -1,5 +1,7 @@
 '''
-collect traffic data from eveng now
+# collect traffic data from eveng 
+# using pipe to send to (1) prompt processor (2) eveng model 
+** try to use subscriber and publisher system
 '''
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-

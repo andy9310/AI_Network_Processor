@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Library: 把 ['L1','L3','L6'] 轉成
-  (a) 對應的 curl 指令清單
-  (b) 對應的 config JSON 物件
-  (c) 亦可直接把 config_<iface>.json 寫到磁碟
+command dealer
+# read the output from the pipe
+# write the output into command (in a file)
 """
 
 import json

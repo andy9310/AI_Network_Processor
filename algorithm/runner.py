@@ -1,4 +1,14 @@
+'''
+eveng with model
+
+'''
 def run():
     '''
-    only traffic we can , estimate queue growing outself
+    
     '''
+    # load model
+    # load telemetry data
+    # feed data into model
+    # output
+    # send output with pipe
+     
