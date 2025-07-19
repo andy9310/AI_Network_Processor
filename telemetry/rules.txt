@@ -1,0 +1,3 @@
+Cisco ios xr 
+1. shut down interface
+http://{host}:{port}/restconf/operational/network-topology:network-topology/topology/topology-netconf/node/{node}/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/interfaces/interface/{iface} 
