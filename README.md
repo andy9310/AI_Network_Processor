@@ -17,3 +17,9 @@ install dependencies
 !pip install --no-deps cut_cross_entropy
 !pip install sentencepiece protobuf datasets huggingface_hub hf_transfer
 ```
+
+## running api file 
+'''
+nohup uvicorn main:app --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 &
+ps aux | grep uvicorn
+'''
