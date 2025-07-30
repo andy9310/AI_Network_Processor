@@ -1,6 +1,6 @@
 """
-2025.7.6
-2025.7.4
+2025.7.7
+2025.7.5
 4.53.2
 0.19.1
 __UNSLOTH_VERSIONING__
@@ -138,7 +138,7 @@ class UnslothAlignPropConfig(AlignPropConfig):
     )
     def __init__(
         self,
-        exp_name = 'main',
+        exp_name = 'uvic',
         run_name = '',
         seed = 3407,
         log_with = None,

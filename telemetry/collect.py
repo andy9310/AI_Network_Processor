@@ -13,21 +13,18 @@
 2. 對每個 node 再列出 interface 名稱
 3. 針對每個 interface 取 generic-counters
 4. 將結果印出或寫檔
-
-執行：
-    python collect_xr_counters.py
 """
-import json
-import sys
-import time
-import urllib.parse
+from flask import Flask, Response
+import urllib3
 import requests
 from requests.auth import HTTPBasicAuth
 
-# === 基本設定 ===
-BASE_URL = "http://localhost:8181/restconf"
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+app = Flask(__name__)
+## device info 192.168.10.22(eveng's linux ip)
+url = "http://192.168.10.22:8181/restconf/operational/network-topology:network-topology/topology/topology-netconf/node/node9/yang-ext:mount/Cisco-IOS-XR-infra-statsd-oper:infra-statistics/interfaces/interface/GigabitEthernet0%2F0%2F0%2F0/generic-counters"
 AUTH     = HTTPBasicAuth("admin", "admin")
-HEADERS  = {"Accept": "application/yang-data+json"}
+HEADERS  = {"Accept": "application/json"}
 # need to forwarding the localhost:8181
 # ---------- 1. 取得 Netconf topology ----------
 def fetch_topology():
@@ -70,17 +67,14 @@ def list_interfaces(node_id):
     ]
 
 # ---------- 3. 取得 generic-counters ----------
-def fetch_generic_counters(node_id, interface_name):
-    enc_if = urllib.parse.quote(interface_name, safe="")
-    url = (
-        f"{BASE_URL}/operational/network-topology:network-topology/topology/topology-netconf"
-        f"/node/{urllib.parse.quote(node_id, safe='')}"
-        f"/yang-ext:mount/Cisco-IOS-XR-infra-statsd-oper:infra-statistics/interfaces/interface"
-        f"/{enc_if}/generic-counters"
-    )
-    r = requests.get(url, auth=AUTH, headers=HEADERS, timeout=10)
-    r.raise_for_status()
-    return r.json()
+def fetch_generic_counters():
+    try:
+        resp = requests.get(url, verify=False, auth=AUTH, headers=HEADERS)
+        data = resp.json()['generic-counters']
+        return data
+    except Exception as e:
+        print(f"Error fetching generic counters: {e}")
+        return {}
 
 # ---------- 4. 主流程 ----------
 def collect_caller():

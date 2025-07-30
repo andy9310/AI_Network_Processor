@@ -3,6 +3,7 @@ from pathlib import Path
 import random, json, os, torch, textwrap
 from unsloth import FastLanguageModel
 from dotenv import load_dotenv
+from collect import fetch_generic_counters
 load_dotenv()
 # ────────────────────── ❶ 載入模型 ──────────────────────────
 MAX_SEQ_LEN  = 2048
@@ -14,8 +15,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length = MAX_SEQ_LEN,
     load_in_4bit   = True,                # 🔧 4-bit 量化→ 8 GB VRAM 夠用
     token          = os.getenv("HUGGINGFACE_TOKEN", ""),
-)
-model = model.to("cuda")                  # 🔧 一次性把整個模型搬上 GPU
+)                 # 🔧 一次性把整個模型搬上 GPU
 print("✅ Model on", model.device)
 
 # ────────────────────── ❷ System prompt ───────────────────
@@ -64,10 +64,13 @@ def generate_random_traffic(links=LINKS, min_traffic=1, max_traffic=1_000):
         if rev_key not in traffic:
             traffic[rev_key] = random.randint(min_traffic, max_traffic)
     return traffic
+def default_collector():
+    """對外提供的 Telemetry 產生器。"""
+    return generate_random_traffic()
 
 def collector():
     """對外提供的 Telemetry 產生器。"""
-    return generate_random_traffic()
+    return fetch_generic_counters()
 # ────────────────────── ❹ LLM 推論 ─────────────────────────
 def llm_inference(links_to_close=None):
     if links_to_close is None:
@@ -106,14 +109,14 @@ def llm_inference(links_to_close=None):
 # ────────────────────── ❺ FastAPI 端點 (原樣) ──────────────
 app = FastAPI(
     title       = "XR Telemetry + LLM Demo",
-    description = "產生隨機 Telemetry，並用 UnsLoTH Llama-3.1 產 RESTCONF 指令",
+    description = "產生Telemetry，並用 UnsLoTH Llama-3.1 taide 產 RESTCONF 指令",
     version     = "1.0.0",
 )
 
 @app.get("/telemetry")
 async def get_telemetry():
     try:
-        return collector()
+        return default_collector()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
