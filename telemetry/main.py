@@ -3,7 +3,7 @@ from pathlib import Path
 import random, json, os, torch, textwrap
 from unsloth import FastLanguageModel
 from dotenv import load_dotenv
-from collect import fetch_generic_counters
+from collect import collect_link_traffic, fetch_generic_counters_legacy
 load_dotenv()
 # ────────────────────── ❶ 載入模型 ──────────────────────────
 MAX_SEQ_LEN  = 2048
@@ -65,12 +65,12 @@ def generate_random_traffic(links=LINKS, min_traffic=1, max_traffic=1_000):
             traffic[rev_key] = random.randint(min_traffic, max_traffic)
     return traffic
 def default_collector():
-    """對外提供的 Telemetry 產生器。"""
+    """default Telemetry 產生器。"""
     return generate_random_traffic()
 
 def collector():
-    """對外提供的 Telemetry 產生器。"""
-    return fetch_generic_counters()
+    """完整 Telemetry 產生器。"""
+    return collect_link_traffic(LINKS)
 # ────────────────────── ❹ LLM 推論 ─────────────────────────
 def llm_inference(links_to_close=None):
     if links_to_close is None:
