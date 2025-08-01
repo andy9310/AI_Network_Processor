@@ -1,60 +1,38 @@
 nohup: 忽略輸入
 🦥 Unsloth: Will patch your computer to enable 2x faster free finetuning.
 🦥 Unsloth Zoo will now patch everything to make training faster!
-🚀 Loading model… (只載一次)
+Loading model… (只載一次)
 ==((====))==  Unsloth 2025.7.5: Fast Llama patching. Transformers: 4.53.2.
    \\   /|    NVIDIA GeForce RTX 4090. Num GPUs = 1. Max memory: 23.635 GB. Platform: Linux.
 O^O/ \_/ \    Torch: 2.7.1+cu126. CUDA: 8.9. CUDA Toolkit: 12.6. Triton: 3.3.1
 \        /    Bfloat16 = TRUE. FA [Xformers = 0.0.31.post1. FA2 = False]
  "-____-"     Free license: http://github.com/unslothai/unsloth
 Unsloth: Fast downloading is enabled - ignore downloading bars which are red colored!
-Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:04<00:14,  4.89s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:08<00:08,  4.02s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:12<00:04,  4.01s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:13<00:00,  2.71s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:13<00:00,  3.26s/it]
-INFO:     Started server process [1613445]
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:03<00:09,  3.24s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:08<00:08,  4.17s/it]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:11<00:03,  3.79s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:12<00:00,  2.57s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:12<00:00,  3.02s/it]
+INFO:rl_model:🤖 Using Mock RL Model for testing
+INFO:rl_model:🤖 Mock RL Model initialized for testing
+INFO:rag_system:Loading embedding model: all-MiniLM-L6-v2
+INFO:sentence_transformers.SentenceTransformer:Use pytorch device_name: cuda:0
+INFO:sentence_transformers.SentenceTransformer:Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+INFO:rag_system:Embedding model loaded successfully
+INFO:rag_system:Loaded vector store from vector_store_cache.pkl
+INFO:rag_system:Loaded vector store from cache
+INFO:     Started server process [2011302]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 taide/Llama-3.1-TAIDE-LX-8B-Chat does not have a padding token! Will use pad_token = <|finetune_right_pad_id|>.
-✅ Model on cuda:0
-INFO:     115.231.78.4:30000 - "GET / HTTP/1.1" 404 Not Found
-INFO:     115.231.78.4:36881 - "GET / HTTP/1.1" 404 Not Found
-INFO:     115.231.78.4:40365 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     115.231.78.4:42092 - "GET /robots.txt HTTP/1.1" 404 Not Found
-WARNING:  Invalid HTTP request received.
-INFO:     98.80.4.31:52474 - "GET / HTTP/1.1" 404 Not Found
-INFO:     98.80.4.31:52486 - "GET / HTTP/1.1" 404 Not Found
-WARNING:  Invalid HTTP request received.
-WARNING:  Invalid HTTP request received.
-WARNING:  Invalid HTTP request received.
-WARNING:  Invalid HTTP request received.
-INFO:     165.227.37.37:53822 - "GET / HTTP/1.1" 404 Not Found
-INFO:     165.227.37.37:53836 - "GET /login HTTP/1.1" 404 Not Found
-INFO:     66.175.213.4:14000 - "GET / HTTP/1.1" 404 Not Found
-WARNING:  Invalid HTTP request received.
-WARNING:  Invalid HTTP request received.
-WARNING:  Invalid HTTP request received.
-INFO:     39.99.145.183:41220 - "GET / HTTP/1.1" 404 Not Found
-INFO:     39.99.145.183:41230 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     162.142.125.217:51662 - "GET / HTTP/1.1" 404 Not Found
-WARNING:  Invalid HTTP request received.
-INFO:     162.142.125.217:58508 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-WARNING:  Invalid HTTP request received.
-WARNING:  Invalid HTTP request received.
-INFO:     162.142.125.217:39020 - "GET /security.txt HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55642 - "GET /stylesheets/theme.css HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55648 - "GET /index.php HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55644 - "GET /customer/js/lang_zh_tw.js HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55658 - "GET /ips/index.php HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55656 - "GET /chs/js/lang_zh_tw.js HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55646 - "GET /index.php HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55660 - "GET /login/stylesheets/theme.css HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55650 - "GET / HTTP/1.1" 404 Not Found
-INFO:     118.123.1.32:55652 - "GET /public/stylesheets/theme.css HTTP/1.1" 404 Not Found
-INFO:     149.50.96.114:11358 - "GET /dispatch.asp HTTP/1.1" 404 Not Found
-INFO:     18.97.26.74:49740 - "GET / HTTP/1.1" 404 Not Found
-INFO:     18.97.26.74:49754 - "GET / HTTP/1.1" 404 Not Found
-INFO:     123.194.149.213:49898 - "GET /telemetry HTTP/1.1" 200 OK
-INFO:     123.194.149.213:49898 - "GET /favicon.ico HTTP/1.1" 404 Not Found
-INFO:     123.194.149.213:49898 - "GET /telemetry HTTP/1.1" 200 OK
-INFO:     123.194.149.213:49898 - "GET /telemetry HTTP/1.1" 200 OK
-INFO:     123.194.149.213:49898 - "GET /telemetry HTTP/1.1" 200 OK
-INFO:     123.194.149.213:49898 - "GET /telemetry HTTP/1.1" 200 OK
+Model on cuda:0
+🤖 RL Model Info: {'status': 'loaded', 'model_path': 'enhanced_energy_rl_20241201_143022', 'device': 'cpu', 'model_type': 'MockRLModel', 'policy_type': 'MockPolicy', 'use_mock': True}
+📚 RAG System initialized with free local embeddings
+✅ Guide.docx loaded into RAG system
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
+INFO:     123.194.149.213:50604 - "GET /telemetry HTTP/1.1" 200 OK
