@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pathlib import Path
 import random, json, os, torch, textwrap
 from unsloth import FastLanguageModel
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 from collect import collect_link_traffic, fetch_generic_counters_legacy
 from rl_model import get_rl_manager
 from rag_system import get_rag_system
+from restconf_processor import process_predicted_links
 load_dotenv()
 # ────────────────────── 載入LLM模型 ──────────────────────────
 MAX_SEQ_LEN  = 2048
@@ -121,7 +123,11 @@ def llm_inference(user_prompt: str = None, use_rag: bool = True):
     telemetry_data = collector() ## link utilization
     links_to_close = predict_links_to_close_rl(telemetry_data)
     print(f"🤖 RL predicted links to close: {links_to_close}")
-
+    
+    # Process predicted links into RESTCONF commands
+    commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
+    print(f"📁 RESTCONF commands saved to: {commands_file}")
+    ## 
     telemetry_json = json.dumps(telemetry_data, ensure_ascii=False)
     
     # Use custom prompt or default
@@ -226,9 +232,16 @@ async def predict_links_rl():
     try:
         telemetry_data = collector()
         links_to_close = predict_links_to_close_rl(telemetry_data)
+        
+        # Process predicted links into RESTCONF commands
+        commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
+        
         return {
             "telemetry_data": telemetry_data,
             "predicted_links_to_close": links_to_close,
+            "restconf_commands": commands,
+            "commands_file": str(commands_file),
+            "config_files": [str(f) for f in config_files],
             "model_info": rl_manager.get_model_info()
         }
     except Exception as e:
@@ -276,5 +289,103 @@ async def search_documents(query: str, top_k: int = 3):
             "results": results,
             "total_found": len(results)
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 新增端點：下載RESTCONF命令文件
+@app.get("/download-commands")
+async def download_commands(filename: str = None):
+    """下載生成的RESTCONF命令文件"""
+    try:
+        output_dir = Path("restconf_output")
+        
+        if filename:
+            # Download specific file
+            file_path = output_dir / filename
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File {filename} not found")
+        else:
+            # Download the most recent commands file
+            command_files = list(output_dir.glob("restconf_commands_*.txt"))
+            if not command_files:
+                raise HTTPException(status_code=404, detail="No command files found")
+            
+            # Get the most recent file
+            file_path = max(command_files, key=lambda f: f.stat().st_mtime)
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=file_path.name,
+            media_type="text/plain"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 新增端點：列出所有可用的命令文件
+@app.get("/list-command-files")
+async def list_command_files():
+    """列出所有可用的RESTCONF命令文件"""
+    try:
+        output_dir = Path("restconf_output")
+        
+        if not output_dir.exists():
+            return {"files": [], "message": "No output directory found"}
+        
+        # Get all command files
+        command_files = list(output_dir.glob("restconf_commands_*.txt"))
+        config_files = list(output_dir.glob("config_*.json"))
+        
+        file_info = []
+        
+        # Add command files info
+        for file_path in command_files:
+            stat = file_path.stat()
+            file_info.append({
+                "filename": file_path.name,
+                "type": "commands",
+                "size": stat.st_size,
+                "created": stat.st_mtime,
+                "download_url": f"/download-commands?filename={file_path.name}"
+            })
+        
+        # Add config files info
+        for file_path in config_files:
+            stat = file_path.stat()
+            file_info.append({
+                "filename": file_path.name,
+                "type": "config",
+                "size": stat.st_size,
+                "created": stat.st_mtime,
+                "download_url": f"/download-config?filename={file_path.name}"
+            })
+        
+        # Sort by creation time (newest first)
+        file_info.sort(key=lambda x: x["created"], reverse=True)
+        
+        return {
+            "files": file_info,
+            "total_files": len(file_info),
+            "command_files": len(command_files),
+            "config_files": len(config_files)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 新增端點：下載配置文件
+@app.get("/download-config")
+async def download_config(filename: str):
+    """下載生成的JSON配置文件"""
+    try:
+        output_dir = Path("restconf_output")
+        file_path = output_dir / filename
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Config file {filename} not found")
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=file_path.name,
+            media_type="application/json"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
