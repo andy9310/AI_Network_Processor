@@ -134,7 +134,7 @@ def llm_inference(user_prompt: str = None, use_rag: bool = True):
     if user_prompt:
         prompt = user_prompt
     else:
-        prompt = f"請根據上述資料，關閉 {', '.join(links_to_close)}"
+        prompt = f"請根據上述資料，關閉 {', '.join(links_to_close)}，整理輸出相關參考資料"
     
     # Enhance prompt with RAG if enabled
     if use_rag and rag_system is not None:
@@ -176,7 +176,7 @@ def llm_inference(user_prompt: str = None, use_rag: bool = True):
         )
 
     generated = outputs[0, input_ids.shape[-1]:]
-    return tokenizer.decode(generated, skip_special_tokens=True).strip()
+    return tokenizer.decode(generated, skip_special_tokens=True).strip() + f"請根據上述資料，關閉 {', '.join(links_to_close)}，關閉的RESTCONF命令為{commands}"
 
 # ────────────────────── ❼ FastAPI 端點 (原樣) ──────────────
 app = FastAPI(
@@ -288,6 +288,32 @@ async def search_documents(query: str, top_k: int = 3):
             "query": query,
             "results": results,
             "total_found": len(results)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 新增端點：獲取拓撲信息
+@app.get("/topology-info")
+async def get_topology_info(links: str = None):
+    """獲取網路拓撲信息，包含介面的真實IPv4地址"""
+    try:
+        from restconf_processor import fetch_topology_info
+        
+        # If no links specified, use a sample or all available links
+        if links:
+            # Parse comma-separated links
+            link_list = [link.strip() for link in links.split(',')]
+        else:
+            # Use sample links for demonstration
+            link_list = ["S1-S2", "S4-S5", "S9-S7", "S10-S12"]
+        
+        topology_data = fetch_topology_info(link_list)
+        
+        return {
+            "requested_links": link_list,
+            "topology_info": topology_data,
+            "total_interfaces": len(topology_data),
+            "message": "Topology information fetched successfully"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
