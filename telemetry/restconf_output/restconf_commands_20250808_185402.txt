@@ -1,0 +1,59 @@
+# RESTCONF Commands to Shutdown Interfaces
+# Generated at: 2025-08-08 18:54:02
+# Total commands: 5
+
+# Command 1
+curl -u admin:admin -X PUT -H 'Content-Type: application/yang-data+json' \
+     'http://192.168.10.22:8181/restconf/data/network-topology:network-topology/topology/topology-netconf/node/node1/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/interface-configurations/interface-configuration/GigabitEthernet0%2F0%2F0%2F0' \
+     -d '{
+       "Cisco-IOS-XR-ifmgr-cfg:interface-configuration": {
+         "active": "act",
+         "interface-name": "GigabitEthernet0/0/0/0",
+         "shutdown": [null]
+       }
+     }'
+
+# Command 2
+curl -u admin:admin -X PUT -H 'Content-Type: application/yang-data+json' \
+     'http://192.168.10.22:8181/restconf/data/network-topology:network-topology/topology/topology-netconf/node/node3/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/interface-configurations/interface-configuration/GigabitEthernet0%2F0%2F0%2F1' \
+     -d '{
+       "Cisco-IOS-XR-ifmgr-cfg:interface-configuration": {
+         "active": "act",
+         "interface-name": "GigabitEthernet0/0/0/1",
+         "shutdown": [null]
+       }
+     }'
+
+# Command 3
+curl -u admin:admin -X PUT -H 'Content-Type: application/yang-data+json' \
+     'http://192.168.10.22:8181/restconf/data/network-topology:network-topology/topology/topology-netconf/node/node5/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/interface-configurations/interface-configuration/GigabitEthernet0%2F0%2F0%2F1' \
+     -d '{
+       "Cisco-IOS-XR-ifmgr-cfg:interface-configuration": {
+         "active": "act",
+         "interface-name": "GigabitEthernet0/0/0/1",
+         "shutdown": [null]
+       }
+     }'
+
+# Command 4
+curl -u admin:admin -X PUT -H 'Content-Type: application/yang-data+json' \
+     'http://192.168.10.22:8181/restconf/data/network-topology:network-topology/topology/topology-netconf/node/node10/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/interface-configurations/interface-configuration/GigabitEthernet0%2F0%2F0%2F2' \
+     -d '{
+       "Cisco-IOS-XR-ifmgr-cfg:interface-configuration": {
+         "active": "act",
+         "interface-name": "GigabitEthernet0/0/0/2",
+         "shutdown": [null]
+       }
+     }'
+
+# Command 5
+curl -u admin:admin -X PUT -H 'Content-Type: application/yang-data+json' \
+     'http://192.168.10.22:8181/restconf/data/network-topology:network-topology/topology/topology-netconf/node/node15/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/interface-configurations/interface-configuration/GigabitEthernet0%2F0%2F0%2F8' \
+     -d '{
+       "Cisco-IOS-XR-ifmgr-cfg:interface-configuration": {
+         "active": "act",
+         "interface-name": "GigabitEthernet0/0/0/8",
+         "shutdown": [null]
+       }
+     }'
+

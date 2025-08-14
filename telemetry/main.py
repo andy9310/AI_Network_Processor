@@ -1,7 +1,11 @@
+import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
+import json
+import re, os, torch, textwrap, numpy as np
 from pathlib import Path
-import random, json, os, torch, textwrap
 from unsloth import FastLanguageModel
 from dotenv import load_dotenv
 from collect import collect_link_traffic, fetch_generic_counters_legacy
@@ -9,6 +13,9 @@ from rl_model import get_rl_manager
 from rag_system import get_rag_system
 from restconf_processor import process_predicted_links
 load_dotenv()
+
+# ────────────────────── 配置設定 ──────────────────────────
+USE_RAG = False  # Set to True to enable RAG, False to disable
 # ────────────────────── 載入LLM模型 ──────────────────────────
 MAX_SEQ_LEN  = 2048
 MODEL_NAME   = "taide/Llama-3.1-TAIDE-LX-8B-Chat"
@@ -23,26 +30,30 @@ print("Model on", model.device)
 
 # ────────────────────── 載入RL模型 ───────────────────
 # 初始化RL模型管理器 (使用真實訓練好的模型)
-rl_manager = get_rl_manager(use_mock=True)
+rl_manager = get_rl_manager(use_mock=False)
 print(f"🤖 RL Model Info: {rl_manager.get_model_info()}")
 
 # ────────────────────── 載入RAG系統 ───────────────────
-# 初始化RAG系統 (使用免費的本地嵌入模型)
-try:
-    rag_system = get_rag_system("all-MiniLM-L6-v2")
-    print("📚 RAG System initialized with free local embeddings")
-
-    # 嘗試載入Guide.docx文檔
+# 初始化RAG系統 (根據配置決定是否啟用)
+if USE_RAG:
     try:
-        rag_system.load_documents("Guide.docx")
-        print("✅ Guide.docx loaded into RAG system")
+        rag_system = get_rag_system("all-MiniLM-L6-v2")
+        print("📚 RAG System initialized with free local embeddings")
+
+        # 嘗試載入Guide.docx文檔
+        try:
+            rag_system.load_documents("Guide.docx")
+            print("✅ Guide.docx loaded into RAG system")
+        except Exception as e:
+            print(f"⚠️ Failed to load Guide.docx: {e}")
+            print("📝 You can load documents later using the /load-document endpoint")
     except Exception as e:
-        print(f"⚠️ Failed to load Guide.docx: {e}")
-        print("📝 You can load documents later using the /load-document endpoint")
-except Exception as e:
-    print(f"⚠️ RAG System initialization failed: {e}")
-    print("📝 RAG features will be disabled")
+        print(f"⚠️ RAG System initialization failed: {e}")
+        print("📝 RAG features will be disabled")
+        rag_system = None
+else:
     rag_system = None
+    print("🚫 RAG System disabled by configuration (USE_RAG = False)")
 
 # ────────────────────── ❸ System prompt ───────────────────
 RULES_PATH = Path("rules.txt")
@@ -50,10 +61,33 @@ rules_text = RULES_PATH.read_text(encoding="utf-8")
 SYSTEM_PROMPT = textwrap.dedent(f"""{rules_text.strip()}
 你是 Cisco IOS XR 網管助手，完整輸出要關閉連結對應 interface 的 RESTCONF curl 指令與對應 config JSON""")
 
+# ────────────────────── ❄ Dynamic Links Generation ───────────
+def get_dynamic_links():
+    """Generate LINKS dynamically from topology data"""
+    try:
+        from collect import get_dynamic_interface_mapping
+        
+        # Get dynamic interface mapping which contains all link information
+        interface_mapping = get_dynamic_interface_mapping()
+        
+        # Extract unique links from the mapping keys
+        links = set()
+        for link_name in interface_mapping.keys():
+            links.add(link_name)
+        
+        # Convert to sorted list for consistency
+        dynamic_links = sorted(list(links))
+        print(f"🔗 Generated {len(dynamic_links)} dynamic links from topology")
+        return dynamic_links
+        
+    except Exception as e:
+        print(f"⚠️  Error generating dynamic links: {e}")
+        print("🔄 Falling back to static LINKS")
+        return STATIC_LINKS
+
 # ────────────────────── ❹ Telemetry 產生器 (略)… ───────────
-# LINKS … generate_random_traffic() 與 collector() 完全照舊
-# (此處省略，保持原來函式不變)
-LINKS = [
+# Static fallback LINKS (kept for backup)
+STATIC_LINKS = [
     "S1-S2", "S1-S3", "S1-S4", "S1-S9",
     "S2-S1", "S2-S4", "S2-S9",
     "S3-S1", "S3-S4", "S3-S9",
@@ -77,6 +111,9 @@ LINKS = [
     "S17-S10", "S17-S15",
 ]
 
+# Generate dynamic links at startup
+LINKS = get_dynamic_links()
+
 def generate_random_traffic(links=LINKS, min_traffic=1, max_traffic=1_000):
     traffic = {}
     for link in links:
@@ -91,9 +128,22 @@ def default_collector():
     """default Telemetry 產生器。"""
     return generate_random_traffic()
 
-def collector():
-    """完整 Telemetry 產生器。"""
-    return collect_link_traffic(LINKS)
+def collector(use_rates=True, measurement_interval=10):
+    """完整 Telemetry 產生器 - uses dynamic links from topology with real-time rates。
+    
+    Args:
+        use_rates (bool): If True, collect traffic rates; if False, use cumulative counters
+        measurement_interval (int): Seconds between measurements for rate calculation
+    
+    Returns:
+        dict: Traffic data (rates in bytes/sec or cumulative bytes)
+    """
+    if use_rates:
+        from collect import collect_traffic_rates
+        return collect_traffic_rates(LINKS, measurement_interval=measurement_interval)
+    else:
+        return collect_link_traffic(LINKS)
+
 # ────────────────────── ❺ RL模型預測函數 ───────────────────
 def predict_links_to_close_rl(telemetry_data: dict) -> list:
     """
@@ -112,20 +162,28 @@ def predict_links_to_close_rl(telemetry_data: dict) -> list:
         return ["L1", "L3", "L6"]  # 預設值
 
 # ────────────────────── ❻ LLM 推論 ─────────────────────────
-def llm_inference(user_prompt: str = None, use_rag: bool = True):
+def llm_inference(user_prompt: str = None, predicted_links: list = None):
     """
-    LLM inference with optional RAG enhancement
+    LLM inference with RAG enhancement
     
     Args:
         user_prompt: Custom user prompt (optional)
-        use_rag: Whether to use RAG enhancement (default: True)
+        predicted_links: Pre-filtered links to close (optional, if None will predict using RL)
     """
     telemetry_data = collector() ## link utilization
-    links_to_close = predict_links_to_close_rl(telemetry_data)
-    print(f"🤖 RL predicted links to close: {links_to_close}")
+    
+    # Use provided filtered links or predict using RL
+    if predicted_links is not None:
+        links_to_close = predicted_links
+        print(f"🔒 Using filtered links to close: {links_to_close}")
+    else:
+        links_to_close = predict_links_to_close_rl(telemetry_data)
+        print(f"🤖 RL predicted links to close: {links_to_close}")
+    
+    energy_saving = len(links_to_close)/25
     
     # Process predicted links into RESTCONF commands
-    commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
+    file_commands, api_commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
     print(f"📁 RESTCONF commands saved to: {commands_file}")
     ## 
     telemetry_json = json.dumps(telemetry_data, ensure_ascii=False)
@@ -136,8 +194,8 @@ def llm_inference(user_prompt: str = None, use_rag: bool = True):
     else:
         prompt = f"請根據上述資料，關閉 {', '.join(links_to_close)}，整理輸出相關參考資料"
     
-    # Enhance prompt with RAG if enabled
-    if use_rag and rag_system is not None:
+    # Enhance prompt with RAG
+    if rag_system is not None:
         try:
             enhanced_prompt = rag_system.enhance_prompt(prompt, SYSTEM_PROMPT)
             print(f"📚 RAG enhanced prompt with relevant documents")
@@ -147,7 +205,7 @@ def llm_inference(user_prompt: str = None, use_rag: bool = True):
             print(f"📝 Using original prompt without RAG")
     else:
         enhanced_prompt = prompt
-        print(f"📝 Using original prompt without RAG")
+        print(f"📝 RAG system not available, using original prompt")
 
     full_prompt = (
         f"以下是即時流量資料（JSON）：\n{telemetry_json}\n\n"
@@ -176,7 +234,14 @@ def llm_inference(user_prompt: str = None, use_rag: bool = True):
         )
 
     generated = outputs[0, input_ids.shape[-1]:]
-    return tokenizer.decode(generated, skip_special_tokens=True).strip() + f"請根據上述資料，關閉 {', '.join(links_to_close)}，關閉的RESTCONF命令為{commands}"
+    # Format commands without escape characters
+    formatted_commands = []
+    for cmd in api_commands:
+        # Remove any remaining escape characters
+        clean_cmd = cmd.replace('\\', '').replace('\n', ' ').replace('\'', '"')
+        formatted_commands.append(clean_cmd)
+    
+    return tokenizer.decode(generated, skip_special_tokens=True).strip() , f"請根據上述資料，關閉 {', '.join(links_to_close)}，關閉的RESTCONF命令為{formatted_commands}" , energy_saving
 
 # ────────────────────── ❼ FastAPI 端點 (原樣) ──────────────
 app = FastAPI(
@@ -188,7 +253,18 @@ app = FastAPI(
 @app.get("/telemetry")
 async def get_telemetry():
     try:
-        return default_collector()
+        # 獲取原始telemetry數據
+        raw_data = collector(use_rates=True, measurement_interval=10)
+        
+        # 只返回整數值
+        formatted_data = {}
+        for link, value in raw_data.items():
+            if isinstance(value, (int, float)):
+                formatted_data[link] = int(round(value))
+            else:
+                formatted_data[link] = value
+        
+        return formatted_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 @app.get("/input")
@@ -198,30 +274,110 @@ async def get_input():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/input")
-async def post_input(user_prompt: str = None, use_rag: bool = True):
-    """Allow users to add custom prompts to the LLM with RAG enhancement"""
-    try:
-        result = llm_inference(user_prompt=user_prompt, use_rag=use_rag)
+from pydantic import BaseModel
+from typing import Optional
+
+class OutputRequest(BaseModel):
+    message: Optional[str] = None
+
+def parse_protected_links(message: str) -> list:
+    """Parse user message to extract protected links from brackets []
+    
+    Args:
+        message: User message that may contain protected links like [S1-S4]
         
+    Returns:
+        list: List of protected link names (including bidirectional pairs)
+    """
+    if not message:
+        return []
+    
+    # Find all content within square brackets
+    bracket_matches = re.findall(r'\[([^\]]+)\]', message)
+    protected_links = []
+    
+    for match in bracket_matches:
+        # Split by comma or space to handle multiple links in one bracket
+        links = re.split(r'[,\s]+', match.strip())
+        for link in links:
+            link = link.strip()
+            if link and '-' in link:  # Basic validation for link format
+                protected_links.append(link)
+                
+                # Add bidirectional link (S6-S15 -> also protect S15-S6)
+                parts = link.split('-')
+                if len(parts) == 2:
+                    reverse_link = f"{parts[1]}-{parts[0]}"
+                    if reverse_link not in protected_links:
+                        protected_links.append(reverse_link)
+    
+    return protected_links
+
+def filter_links_to_close(predicted_links: list, protected_links: list) -> list:
+    """Filter out protected links from predicted links to close
+    
+    Args:
+        predicted_links: Links predicted by the model to be closed
+        protected_links: Links that user wants to keep open
+        
+    Returns:
+        list: Filtered links excluding protected ones
+    """
+    if not protected_links:
+        return predicted_links
+    
+    filtered_links = [link for link in predicted_links if link not in protected_links]
+    
+    if len(filtered_links) != len(predicted_links):
+        excluded = [link for link in predicted_links if link in protected_links]
+        print(f"🔒 Excluded protected links: {excluded}")
+        print(f"📋 Filtered links to close: {filtered_links}")
+    
+    return filtered_links
+
+@app.post("/output")
+async def post_output(request: OutputRequest):
+    """Process user message with full network analysis pipeline"""
+    try:
+        # Extract message and settings from request body
+        user_prompt = request.message
+        print(f"📨 Received user message: {user_prompt}")
+        
+        # Parse protected links from user message (includes bidirectional pairs)
+        protected_links = parse_protected_links(user_prompt)
+        if protected_links:
+            print(f"🔒 Protected links found (including bidirectional): {protected_links}")
+        
+        # Get fresh telemetry data and predictions
         telemetry_data = collector()
         links_to_close = predict_links_to_close_rl(telemetry_data)
         
+        # Filter out protected links from the prediction
+        filtered_links_to_close = filter_links_to_close(links_to_close, protected_links)
+        
+        # Run LLM inference with user message and filtered links
+        # Pass the filtered links to ensure RESTCONF commands only include allowed links
+        result, commands, energy_saving = llm_inference(user_prompt=user_prompt, predicted_links=filtered_links_to_close)
+        
         return {
-            "user_prompt": user_prompt,
-            "use_rag": use_rag,
-            "telemetry_data": telemetry_data,
-            "predicted_links_to_close": links_to_close,
-            "result": result
+            "llm_result": result,
+            "restconf_commands": commands,
+            "energy_saving_percentage": f"{energy_saving:.1%}"
         }
     except Exception as e:
+        print(f"❌ Error in POST /output: {e}")
         raise HTTPException(status_code=500, detail=str(e))
         
 @app.get("/output")
-async def get_output(use_rag: bool = True):
+async def get_output():
+    """Get LLM inference result with network analysis"""
     try:
-        result = llm_inference(use_rag=use_rag)
-        return {"result": result, "use_rag": use_rag}
+        result, commands, energy_saving = llm_inference()
+        return {
+            "llm_result": result, 
+            "restconf_commands": commands,
+            "energy_saving_percentage": f"{energy_saving:.1%}"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -230,16 +386,29 @@ async def get_output(use_rag: bool = True):
 async def predict_links_rl():
     """使用RL模型來預測應該關閉哪些link"""
     try:
-        telemetry_data = collector()
+        # Get raw telemetry data (simple float values)
+        raw_telemetry = collector()
+        
+        # Convert to format expected by RL model
+        telemetry_data = {}
+        for link, traffic_value in raw_telemetry.items():
+            if isinstance(traffic_value, (int, float)):
+                telemetry_data[link] = {
+                    'traffic': traffic_value,
+                    'output-drops': 0,  # Simulated values since we don't have real drop data
+                    'output-queue-drops': 0,
+                    'max-capacity': 10000
+                }
+        
         links_to_close = predict_links_to_close_rl(telemetry_data)
         
         # Process predicted links into RESTCONF commands
-        commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
+        file_commands, api_commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
         
         return {
             "telemetry_data": telemetry_data,
             "predicted_links_to_close": links_to_close,
-            "restconf_commands": commands,
+            "restconf_commands": api_commands,
             "commands_file": str(commands_file),
             "config_files": [str(f) for f in config_files],
             "model_info": rl_manager.get_model_info()
@@ -252,9 +421,114 @@ async def predict_links_rl():
 async def get_rl_model_info():
     """獲取RL模型信息"""
     try:
-        return rl_manager.get_model_info()
+        model_info = rl_manager.get_model_info()
+        return model_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# 新增端點：查看telemetry數據如何轉換為模型特徵
+@app.get("/telemetry-features")
+async def get_telemetry_features():
+    """獲取當前telemetry數據及其轉換為模型特徵的詳細信息"""
+    try:
+        # 收集當前telemetry數據
+        raw_telemetry = collector(use_rates=True, measurement_interval=5)
+        
+        # 轉換為模型期望的格式
+        telemetry_data = {}
+        for link, traffic_value in raw_telemetry.items():
+            if isinstance(traffic_value, (int, float)):
+                telemetry_data[link] = {
+                    'traffic': traffic_value,
+                    'output-drops': 0,  # 模擬值
+                    'output-queue-drops': 0,  # 模擬值
+                    'max-capacity': 10000  # 模擬值
+                }
+        
+        # 獲取模型的預處理特徵
+        features = rl_manager.preprocess_telemetry_data(telemetry_data)
+        
+        # 創建詳細的特徵解釋
+        feature_details = []
+        feature_names = [
+            "buffer_utilization",
+            "link_utilization", 
+            "link_status",
+            "buffer_change_rate",
+            "util_change_rate",
+            "time_since_change",
+            "normalized_node_degree"
+        ]
+        
+        for i, link in enumerate(rl_manager.links):
+            link_features = {}
+            
+            # 原始telemetry數據
+            raw_data = telemetry_data.get(link, {})
+            
+            # 模型特徵
+            if i < len(features):
+                for j, feature_name in enumerate(feature_names):
+                    link_features[feature_name] = float(features[i][j]) if j < len(features[i]) else 0.0
+            
+            # 計算詳細信息
+            traffic = raw_data.get('traffic', 0)
+            max_capacity = raw_data.get('max-capacity', 1000)
+            output_drops = raw_data.get('output-drops', 0)
+            output_queue_drops = raw_data.get('output-queue-drops', 0)
+            total_drops = output_drops + output_queue_drops
+            
+            # 計算推導值
+            drop_rate = total_drops / max(1, traffic + total_drops) if (traffic + total_drops) > 0 else 0
+            calculated_buffer_util = min(1.0, drop_rate * 10)
+            calculated_link_util = min(1.0, traffic / max_capacity) if max_capacity > 0 else 0.0
+            
+            feature_details.append({
+                "link": link,
+                "raw_telemetry": {
+                    "traffic_bytes_per_sec": traffic,
+                    "max_capacity": max_capacity,
+                    "output_drops": output_drops,
+                    "output_queue_drops": output_queue_drops,
+                    "total_drops": total_drops,
+                    "drop_rate": drop_rate
+                },
+                "calculated_metrics": {
+                    "buffer_utilization": calculated_buffer_util,
+                    "link_utilization": calculated_link_util,
+                    "utilization_percentage": calculated_link_util * 100
+                },
+                "model_features": link_features,
+                "feature_explanations": {
+                    "buffer_utilization": f"Estimated from drop rate: {drop_rate:.4f} * 10 = {calculated_buffer_util:.4f}",
+                    "link_utilization": f"Traffic/Capacity: {traffic}/{max_capacity} = {calculated_link_util:.4f}",
+                    "link_status": "1.0 = UP, 0.0 = DOWN (currently assumed UP)",
+                    "buffer_change_rate": "Change in buffer utilization from previous measurement",
+                    "util_change_rate": "Change in link utilization from previous measurement",
+                    "time_since_change": "Time since last link state change (simplified to 0)",
+                    "normalized_node_degree": "Node connectivity degree normalized to [0,1]"
+                }
+            })
+        
+        return {
+            "timestamp": telemetry_data.get('timestamp', 'unknown'),
+            "measurement_interval_seconds": 5,
+            "total_links": len(rl_manager.links),
+            "features_per_link": len(feature_names),
+            "feature_names": feature_names,
+            "model_input_shape": list(features.shape) if features is not None else None,
+            "link_details": feature_details,
+            "summary": {
+                "avg_buffer_utilization": float(np.mean([f["model_features"]["buffer_utilization"] for f in feature_details])),
+                "avg_link_utilization": float(np.mean([f["model_features"]["link_utilization"] for f in feature_details])),
+                "max_link_utilization": float(np.max([f["model_features"]["link_utilization"] for f in feature_details])),
+                "links_with_drops": len([f for f in feature_details if f["raw_telemetry"]["total_drops"] > 0]),
+                "active_links": len([f for f in feature_details if f["raw_telemetry"]["traffic_bytes_per_sec"] > 0])
+            }
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting telemetry features: {str(e)}")
 
 # 新增端點：載入文檔到RAG系統
 @app.post("/load-document")
@@ -294,26 +568,15 @@ async def search_documents(query: str, top_k: int = 3):
 
 # 新增端點：獲取拓撲信息
 @app.get("/topology-info")
-async def get_topology_info(links: str = None):
-    """獲取網路拓撲信息，包含介面的真實IPv4地址"""
+async def get_topology_info():
+    """獲取網路拓撲信息，包含所有節點和介面的真實IPv4地址"""
     try:
         from restconf_processor import fetch_topology_info
-        
-        # If no links specified, use a sample or all available links
-        if links:
-            # Parse comma-separated links
-            link_list = [link.strip() for link in links.split(',')]
-        else:
-            # Use sample links for demonstration
-            link_list = ["S1-S2", "S4-S5", "S9-S7", "S10-S12"]
-        
-        topology_data = fetch_topology_info(link_list)
-        
+        topology_data = fetch_topology_info()
         return {
-            "requested_links": link_list,
             "topology_info": topology_data,
             "total_interfaces": len(topology_data),
-            "message": "Topology information fetched successfully"
+            "message": "Complete topology information fetched successfully"
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
