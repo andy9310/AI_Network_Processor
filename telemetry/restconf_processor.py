@@ -18,19 +18,56 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# RESTCONF URL format for shutting down interfaces
-REST_ROOT_FMT = ("http://{host}:{port}/restconf/data/"
-                 "network-topology:network-topology/topology/topology-netconf/"
-                 "node/{node}/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg/"
-                 "interface-configurations/interface-configuration/{interface_name}")
+# RESTCONF URL format for interface configuration (config endpoint)
+CONFIG_ROOT_FMT = ("http://{host}:{port}/restconf/config/"
+                   "network-topology:network-topology/topology/topology-netconf/"
+                   "node/{node}/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/"
+                   "interface-configuration/act/{interface_name}")
 
-def _iface_to_url(interface: str, *, host: str, port: int, node: str) -> str:
-    """Convert interface name to RESTCONF URL with proper URL encoding"""
+# RESTCONF URL format for operational data (for fetching current state)
+OPERATIONAL_ROOT_FMT = ("http://{host}:{port}/restconf/operational/"
+                        "network-topology:network-topology/topology/topology-netconf/"
+                        "node/{node}/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/"
+                        "interface-configuration/act/{interface_name}")
+
+def _iface_to_config_url(interface: str, *, host: str, port: int, node: str) -> str:
+    """Convert interface name to RESTCONF config URL with proper URL encoding"""
     safe_interface = urllib.parse.quote(interface, safe='')
-    return REST_ROOT_FMT.format(host=host, port=port, node=node, interface_name=safe_interface)
+    return CONFIG_ROOT_FMT.format(host=host, port=port, node=node, interface_name=safe_interface)
+
+def _iface_to_operational_url(interface: str, *, host: str, port: int, node: str) -> str:
+    """Convert interface name to RESTCONF operational URL with proper URL encoding"""
+    safe_interface = urllib.parse.quote(interface, safe='')
+    return OPERATIONAL_ROOT_FMT.format(host=host, port=port, node=node, interface_name=safe_interface)
+
+def fetch_interface_config_from_config_endpoint(node_id: str, interface_name: str, *, host="192.168.10.22", port=8181) -> Dict:
+    """Fetch interface configuration from config endpoint (for shutdown operations)
+    
+    Args:
+        node_id: Node identifier (e.g., 'node1')
+        interface_name: Interface name (e.g., 'GigabitEthernet0/0/0/0')
+        host: RESTCONF host address
+        port: RESTCONF port
+    
+    Returns:
+        Dict containing interface configuration data from config endpoint
+    """
+    # Build config URL
+    config_url = _iface_to_config_url(interface_name, host=host, port=port, node=node_id)
+    
+    try:
+        print(f"🔍 Fetching config for {node_id}/{interface_name} from config endpoint...")
+        resp = requests.get(config_url, verify=False, auth=AUTH, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        config_data = resp.json()
+        print(f"✅ Successfully fetched config for {interface_name}")
+        return config_data
+    except Exception as e:
+        print(f"⚠️  Error fetching config for {node_id}/{interface_name}: {e}")
+        return {}
 
 def fetch_interface_config(node_id: str, interface_name: str) -> Dict:
-    """Fetch interface configuration including IPv4 address from RESTCONF API
+    """Fetch interface configuration including IPv4 address from RESTCONF API (operational endpoint)
     
     Args:
         node_id: Node identifier (e.g., 'node1')
@@ -42,8 +79,8 @@ def fetch_interface_config(node_id: str, interface_name: str) -> Dict:
     # URL encode the interface name
     safe_interface = urllib.parse.quote(interface_name, safe='')
     
-    # RESTCONF URL for interface configuration
-    url = f"{BASE_URL}/operational/network-topology:network-topology/topology/topology-netconf/node/{node_id}/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/{safe_interface}"
+    # RESTCONF URL for interface configuration (operational)
+    url = f"{BASE_URL}/operational/network-topology:network-topology/topology/topology-netconf/node/{node_id}/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/{safe_interface}"
     
     try:
         resp = requests.get(url, verify=False, auth=AUTH, headers=HEADERS, timeout=30)
@@ -194,19 +231,48 @@ def fetch_topology_info() -> Dict[str, Dict[str, str]]:
         'topology_info': topology_info
     }
 
-def build_shutdown_commands(links: List[str], *, host="192.168.10.22", port=8181, auth="admin:admin", for_file=True) -> List[str]:
+def add_shutdown_to_config(config_data: Dict) -> Dict:
+    """Add shutdown field to existing interface configuration
+    
+    Args:
+        config_data: Original interface configuration from config endpoint
+    
+    Returns:
+        Modified configuration with shutdown field added
     """
-    Build curl commands to shutdown interfaces for the given links
+    # Make a deep copy to avoid modifying original
+    import copy
+    modified_config = copy.deepcopy(config_data)
+    
+    # Navigate to interface-configuration and add shutdown
+    if 'interface-configuration' in modified_config:
+        interface_configs = modified_config['interface-configuration']
+        if isinstance(interface_configs, list) and len(interface_configs) > 0:
+            # Add shutdown field to the first (and typically only) interface config
+            interface_configs[0]['shutdown'] = None
+            print(f"✅ Added shutdown field to interface configuration")
+        else:
+            print(f"⚠️  Unexpected interface-configuration structure")
+    else:
+        print(f"⚠️  No interface-configuration found in config data")
+    
+    return modified_config
+
+def build_shutdown_commands_two_step(links: List[str], *, host="192.168.10.22", port=8181, auth="admin:admin", for_file=True) -> List[str]:
+    """
+    Build curl commands using two-step process:
+    1. GET current interface configuration from config endpoint
+    2. PUT modified configuration with shutdown field added
     
     Args:
         links: List of link names (e.g., ['S1-S2', 'S2-S1'])
         host: RESTCONF host address
         port: RESTCONF port
         auth: Authentication credentials
-        for_file: If True, format for shell file execution (with escapes). If False, clean format for API response.
+        for_file: If True, format for shell file execution. If False, clean format for API response.
     
     Returns:
-        List of curl command strings
+        List of curl command strings (GET + PUT for each interface)
     """
     commands = []
     
@@ -225,30 +291,86 @@ def build_shutdown_commands(links: List[str], *, host="192.168.10.22", port=8181
             print(f"⚠️  Warning: Node {src_node} not found in node mapping, skipping...")
             continue
         
-        # Build RESTCONF URL
-        url = _iface_to_url(interface, host=host, port=port, node=node_id)
+        # Build RESTCONF config URL
+        config_url = _iface_to_config_url(interface, host=host, port=port, node=node_id)
         
-        # Build curl command for shutting down the interface
+        # Step 1: GET current configuration
         if for_file:
-            # Format with escapes for shell file execution
-            cmd = (f"curl -u {auth} -X PUT "
-                   f"-H 'Content-Type: application/yang-data+json' \\\n"
-                   f"     '{url}' \\\n"
-                   f"     -d '{{\n"
-                   f"       \"Cisco-IOS-XR-ifmgr-cfg:interface-configuration\": {{\n"
-                   f"         \"active\": \"act\",\n"
-                   f"         \"interface-name\": \"{interface}\",\n"
-                   f"         \"shutdown\": [null]\n"
-                   f"       }}\n"
-                   f"     }}'")
+            get_cmd = (f"# Step 1: Get current configuration for {interface}\n"
+                      f"curl -u {auth} -X GET \\\n"
+                      f"     -H 'Content-Type: application/json' \\\n"
+                      f"     '{config_url}' > put_{interface.replace('/', '_')}.json")
         else:
-            # Clean format for API response - single line with spaces
-            json_data = '{"Cisco-IOS-XR-ifmgr-cfg:interface-configuration": {"active": "act", "interface-name": "' + interface + '", "shutdown": [null]}}'
-            cmd = f"curl -u {auth} -X PUT -H 'Content-Type: application/yang-data+json' '{url}' -d '{json_data}'"
+            get_cmd = f"curl -u {auth} -X GET -H 'Content-Type: application/json' '{config_url}' > put_{interface.replace('/', '_')}.json"
         
-        commands.append(cmd)
+        commands.append(get_cmd)
+        
+        # Step 2: PUT modified configuration with shutdown
+        # Note: The actual JSON modification would need to be done between GET and PUT
+        # For now, we'll show the PUT command that expects the modified JSON file
+        if for_file:
+            put_cmd = (f"# Step 2: PUT modified configuration with shutdown for {interface}\n"
+                      f"curl -u {auth} -X PUT \\\n"
+                      f"     -H 'Content-Type: application/json' \\\n"
+                      f"     '{config_url}' \\\n"
+                      f"     -d @put_{interface.replace('/', '_')}.json")
+        else:
+            put_cmd = f"curl -u {auth} -X PUT -H 'Content-Type: application/json' '{config_url}' -d @put_{interface.replace('/', '_')}.json"
+        
+        commands.append(put_cmd)
+        
+        # Add separator for readability
+        if for_file:
+            commands.append("")
     
     return commands
+
+def build_shutdown_commands(links: List[str], *, host="192.168.10.22", port=8181, auth="admin:admin", for_file=True) -> List[str]:
+    """Legacy function - redirects to two-step process"""
+    return build_shutdown_commands_two_step(links, host=host, port=port, auth=auth, for_file=for_file)
+
+def build_config_files_two_step(links: List[str], *, host="192.168.10.22", port=8181) -> Dict[str, Dict]:
+    """
+    Build JSON configuration files by fetching current config and adding shutdown field
+    Uses the two-step process: GET current config, then modify with shutdown
+    
+    Args:
+        links: List of link names
+        host: RESTCONF host address
+        port: RESTCONF port
+    
+    Returns:
+        Dictionary mapping interface names to their modified JSON configurations
+    """
+    configs = {}
+    
+    for link in links:
+        if link not in INTERFACE_MAPPING:
+            continue
+            
+        interface = INTERFACE_MAPPING[link]
+        src_node = link.split('-')[0]
+        node_id = NODE_MAPPING.get(src_node)
+        
+        if not node_id:
+            continue
+        
+        # Step 1: Fetch current configuration from config endpoint
+        print(f"📥 Fetching current config for {interface}...")
+        current_config = fetch_interface_config_from_config_endpoint(node_id, interface, host=host, port=port)
+        
+        if not current_config:
+            print(f"⚠️  Could not fetch config for {interface}, skipping...")
+            continue
+        
+        # Step 2: Add shutdown field to the configuration
+        print(f"🔧 Adding shutdown field to {interface} config...")
+        modified_config = add_shutdown_to_config(current_config)
+        
+        configs[interface] = modified_config
+        print(f"✅ Config prepared for {interface}")
+    
+    return configs
 
 def build_config_files(links: List[str]) -> Dict[str, Dict]:
     """
@@ -288,7 +410,7 @@ def build_config_files(links: List[str]) -> Dict[str, Dict]:
             "interface-configuration": [{
                 "active": "act",
                 "interface-name": interface,
-                "shutdown": [None],
+                "shutdown": None,
                 "Cisco-IOS-XR-ifmgr-cfg:ipv4-network":{
                     "addresses": {
                         "primary": {
@@ -360,10 +482,10 @@ def process_predicted_links(links_to_close: List[str], **kwargs) -> Tuple[List[s
     """
     print(f"\n🔧 Processing {len(links_to_close)} predicted links into RESTCONF commands...")
     
-    # Build commands in both formats
-    file_commands = build_shutdown_commands(links_to_close, for_file=True, **kwargs)  # For file writing
-    api_commands = build_shutdown_commands(links_to_close, for_file=False, **kwargs)  # For API response
-    configs = build_config_files(links_to_close)
+    # Build commands in both formats using two-step process
+    file_commands = build_shutdown_commands_two_step(links_to_close, for_file=True, **kwargs)  # For file writing
+    api_commands = build_shutdown_commands_two_step(links_to_close, for_file=False, **kwargs)  # For API response
+    configs = build_config_files_two_step(links_to_close, **kwargs)
     
     # Write files using the file format commands
     commands_file, config_files = write_command_files(file_commands, configs)

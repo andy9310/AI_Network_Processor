@@ -351,7 +351,6 @@ The system includes comprehensive error handling:
 - `main.py`: FastAPI application with LLM, RL, and RAG integration
 - `rl_model.py`: RL model loading and inference module
 - `rag_system.py`: RAG system for document retrieval and prompt enhancement
-- `rules.txt`: System rules for LLM
 
 ### Test Files
 - `test_mock_rl.py`: Test script for mock RL model functionality

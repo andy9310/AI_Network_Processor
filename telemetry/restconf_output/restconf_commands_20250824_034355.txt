@@ -1,0 +1,68 @@
+# RESTCONF Commands to Shutdown Interfaces
+# Generated at: 2025-08-24 03:43:55
+# Total commands: 12
+
+# Command 1
+# Step 1: Get current configuration for GigabitEthernet0/0/0/10
+curl -u admin:admin -X GET \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node4/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F10' > put_GigabitEthernet0_0_0_10.json
+
+# Command 2
+# Step 2: PUT modified configuration with shutdown for GigabitEthernet0/0/0/10
+curl -u admin:admin -X PUT \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node4/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F10' \
+     -d @put_GigabitEthernet0_0_0_10.json
+
+# Command 3
+
+
+# Command 4
+# Step 1: Get current configuration for GigabitEthernet0/0/0/0
+curl -u admin:admin -X GET \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node15/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F0' > put_GigabitEthernet0_0_0_0.json
+
+# Command 5
+# Step 2: PUT modified configuration with shutdown for GigabitEthernet0/0/0/0
+curl -u admin:admin -X PUT \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node15/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F0' \
+     -d @put_GigabitEthernet0_0_0_0.json
+
+# Command 6
+
+
+# Command 7
+# Step 1: Get current configuration for GigabitEthernet0/0/0/8
+curl -u admin:admin -X GET \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node9/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F8' > put_GigabitEthernet0_0_0_8.json
+
+# Command 8
+# Step 2: PUT modified configuration with shutdown for GigabitEthernet0/0/0/8
+curl -u admin:admin -X PUT \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node9/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F8' \
+     -d @put_GigabitEthernet0_0_0_8.json
+
+# Command 9
+
+
+# Command 10
+# Step 1: Get current configuration for GigabitEthernet0/0/0/2
+curl -u admin:admin -X GET \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node15/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F2' > put_GigabitEthernet0_0_0_2.json
+
+# Command 11
+# Step 2: PUT modified configuration with shutdown for GigabitEthernet0/0/0/2
+curl -u admin:admin -X PUT \
+     -H 'Content-Type: application/json' \
+     'http://192.168.10.22:8181/restconf/config/network-topology:network-topology/topology/topology-netconf/node/node15/yang-ext:mount/Cisco-IOS-XR-ifmgr-cfg:interface-configurations/interface-configuration/act/GigabitEthernet0%2F0%2F0%2F2' \
+     -d @put_GigabitEthernet0_0_0_2.json
+
+# Command 12
+
+

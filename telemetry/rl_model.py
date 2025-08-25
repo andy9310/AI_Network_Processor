@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import logging
-import random
+# import random  # Removed - no longer needed without MockRLModel
 
 # Try to import stable_baselines3, but don't fail if not available
 try:
@@ -100,55 +100,7 @@ else:
         """Placeholder for EnhancedNetworkPolicy when stable_baselines3 is not available"""
         pass
 
-class MockRLModel:
-    """模擬RL模型，用於測試階段"""
-    
-    def __init__(self):
-        self.links = [
-            "S1-S2", "S1-S3", "S1-S4", "S1-S9",
-            "S2-S1", "S2-S4", "S2-S9",
-            "S3-S1", "S3-S4", "S3-S9",
-            "S4-S1", "S4-S2", "S4-S3", "S4-S5", "S4-S6", "S4-S7",
-            "S4-S8", "S4-S9", "S4-S10", "S4-S11", "S4-S15",
-            "S5-S4", "S5-S9",
-            "S6-S4", "S6-S15",
-            "S7-S4", "S7-S9",
-            "S8-S4", "S8-S9",
-            "S9-S1", "S9-S2", "S9-S3", "S9-S4", "S9-S5",
-            "S9-S7", "S9-S8", "S9-S10", "S9-S15",
-            "S10-S4", "S10-S9", "S10-S12", "S10-S13",
-            "S10-S14", "S10-S15", "S10-S16", "S10-S17",
-            "S11-S4", "S11-S15",
-            "S12-S10", "S12-S15",
-            "S13-S10", "S13-S15",
-            "S14-S10", "S14-S15",
-            "S15-S4", "S15-S6", "S15-S9", "S15-S10", "S15-S11",
-            "S15-S12", "S15-S13", "S15-S14", "S15-S16", "S15-S17",
-            "S16-S10", "S16-S15",
-            "S17-S10", "S17-S15",
-        ]
-        
-        # 定義一些預設的關閉策略
-        self.closing_strategies = [
-            # 策略1: 關閉低流量連結
-            ["S1-S9", "S2-S9", "S3-S9", "S5-S9", "S7-S9", "S8-S9"],
-            # 策略2: 關閉邊緣連結
-            ["S1-S2", "S1-S3", "S16-S10", "S17-S10", "S11-S4", "S12-S10"],
-            # 策略3: 關閉冗餘連結
-            ["S4-S5", "S4-S6", "S4-S7", "S4-S8", "S9-S7", "S9-S8"],
-            # 策略4: 關閉高延遲連結
-            ["S1-S4", "S2-S4", "S3-S4", "S10-S4", "S11-S4"],
-            # 策略5: 隨機選擇
-            ["S1-S2", "S3-S4", "S5-S9", "S10-S12", "S15-S16"]
-        ]
-        
-        logger.info("🤖 Mock RL Model initialized for testing")
-    
-    def predict(self, observation, deterministic=True):
-        """模擬模型預測，返回隨機的閾值"""
-        # 生成隨機的3維動作 (閾值)
-        action = np.random.uniform(0.0, 1.0, 3)
-        return action, None
+# MockRLModel class removed - only real RL models supported
 
 class RLModelManager:
     """
@@ -156,7 +108,7 @@ class RLModelManager:
     負責載入訓練好的PPO模型、處理輸入數據、進行推理
     """
     
-    def __init__(self, model_path: str = None, device: str = "cpu", use_mock: bool = True):
+    def __init__(self, model_path: str = None, device: str = "cpu", use_mock: bool = False):
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.model = None
         # Update this path to match your trained model filename
@@ -234,15 +186,13 @@ class RLModelManager:
     def load_model(self):
         """載入訓練好的PPO模型或使用模擬模型"""
         if self.use_mock:
-            logger.info("🤖 Using Mock RL Model for testing")
-            self.model = MockRLModel()
-            return
+            logger.error("❌ Mock RL Model has been removed. Please use real RL model.")
+            raise ValueError("Mock RL Model is no longer supported")
         
         # Check if stable_baselines3 is available
         if not STABLE_BASELINES3_AVAILABLE:
-            logger.warning("⚠️ stable_baselines3 not available. Using Mock RL Model.")
-            self.model = MockRLModel()
-            return
+            logger.error("❌ stable_baselines3 not available. Cannot load real RL model.")
+            raise ImportError("stable_baselines3 is required for RL model operation")
         
         try:
             # Check if model directory exists (for extracted models) or zip file exists
@@ -264,14 +214,12 @@ class RLModelManager:
                 logger.info("✅ RL model loaded successfully")
                 
             else:
-                logger.warning(f"⚠️ Model file/directory not found: {self.model_path}")
-                logger.info("🔄 Using Mock RL Model for testing...")
-                self.model = MockRLModel()
+                logger.error(f"❌ Model file/directory not found: {self.model_path}")
+                raise FileNotFoundError(f"RL model not found at {self.model_path}")
                 
         except Exception as e:
             logger.error(f"❌ Failed to load RL model: {e}")
-            logger.info("🔄 Falling back to Mock RL Model...")
-            self.model = MockRLModel()
+            raise e
     
     def preprocess_telemetry_data(self, telemetry_data: Dict) -> np.ndarray:
         """
@@ -403,12 +351,7 @@ class RLModelManager:
                 logger.warning("⚠️ No RL model loaded, using fallback")
                 return ["S1-S2", "S3-S4", "S5-S9"]
             
-            # 如果是模擬模型，使用預定義策略
-            if isinstance(self.model, MockRLModel):
-                # 隨機選擇一個策略
-                strategy = random.choice(self.model.closing_strategies)
-                logger.info(f"🤖 Mock RL selected strategy: {strategy}")
-                return strategy
+            # Mock RL model removed - only real RL models supported
             
             # 預處理數據
             observation = self.preprocess_telemetry_data(telemetry_data)
@@ -440,7 +383,7 @@ class RLModelManager:
         if self.model is None:
             return {"status": "not_loaded"}
         
-        model_type = "MockRLModel" if isinstance(self.model, MockRLModel) else "PPO"
+        model_type = "PPO"
         
         return {
             "status": "loaded",
@@ -459,11 +402,11 @@ class RLModelManager:
         
         save_path = save_path or self.model_path
         try:
-            if not isinstance(self.model, MockRLModel) and STABLE_BASELINES3_AVAILABLE:
+            if STABLE_BASELINES3_AVAILABLE:
                 self.model.save(save_path)
                 logger.info(f"✅ Model saved to {save_path}")
             else:
-                logger.warning("⚠️ Cannot save MockRLModel or stable_baselines3 not available")
+                logger.error("❌ stable_baselines3 not available - cannot save model")
             
         except Exception as e:
             logger.error(f"❌ Failed to save model: {e}")
@@ -471,7 +414,7 @@ class RLModelManager:
 # 全局模型管理器實例
 rl_manager = None
 
-def get_rl_manager(use_mock: bool = True) -> RLModelManager:
+def get_rl_manager(use_mock: bool = False) -> RLModelManager:
     """獲取全局RL模型管理器實例"""
     global rl_manager
     if rl_manager is None:

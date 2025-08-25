@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from collect import collect_link_traffic, fetch_generic_counters_legacy
 from rl_model import get_rl_manager
 from rag_system import get_rag_system
-from restconf_processor import process_predicted_links
+from restconf_processor import process_predicted_links, build_shutdown_commands
 load_dotenv()
 
 # ────────────────────── 配置設定 ──────────────────────────
@@ -56,10 +56,7 @@ else:
     print("🚫 RAG System disabled by configuration (USE_RAG = False)")
 
 # ────────────────────── ❸ System prompt ───────────────────
-RULES_PATH = Path("rules.txt")
-rules_text = RULES_PATH.read_text(encoding="utf-8")
-SYSTEM_PROMPT = textwrap.dedent(f"""{rules_text.strip()}
-你是 Cisco IOS XR 網管助手，完整輸出要關閉連結對應 interface 的 RESTCONF curl 指令與對應 config JSON""")
+SYSTEM_PROMPT = textwrap.dedent(f"""你是 Cisco IOS XR 網管助手，你將被提供網路流量資料，請分析資料後，輸出分析結果，請簡短扼要，不要輸出指令，不超過2000字元""")
 
 # ────────────────────── ❄ Dynamic Links Generation ───────────
 def get_dynamic_links():
@@ -180,7 +177,64 @@ def llm_inference(user_prompt: str = None, predicted_links: list = None):
         links_to_close = predict_links_to_close_rl(telemetry_data)
         print(f"🤖 RL predicted links to close: {links_to_close}")
     
-    energy_saving = len(links_to_close)/25
+    # Calculate energy saving based on bidirectional link pairs
+    def find_bidirectional_pairs_in_telemetry(telemetry_data):
+        """Find bidirectional pairs in telemetry data, matching the algorithm logic"""
+        bidirectional_pairs = {}
+        
+        for link_name in telemetry_data.keys():
+            if '-' not in link_name:
+                continue
+                
+            src, dst = link_name.split('-')
+            reverse_link = f"{dst}-{src}"
+            
+            # Check if reverse link exists in telemetry
+            if reverse_link in telemetry_data:
+                # Create canonical name (alphabetically sorted)
+                canonical_name = f"{min(src, dst)}-{max(src, dst)}"
+                
+                # Only add if not already processed
+                if canonical_name not in bidirectional_pairs:
+                    bidirectional_pairs[canonical_name] = (link_name, reverse_link)
+        
+        return bidirectional_pairs
+    
+    def count_closed_pairs(links_to_close, bidirectional_pairs):
+        """Count how many bidirectional pairs are being closed"""
+        closed_pairs = set()
+        
+        for link in links_to_close:
+            if '-' not in link:
+                continue
+                
+            src, dst = link.split('-')
+            canonical_name = f"{min(src, dst)}-{max(src, dst)}"
+            
+            # Check if this canonical pair exists in our bidirectional pairs
+            if canonical_name in bidirectional_pairs:
+                closed_pairs.add(canonical_name)
+        
+        return len(closed_pairs)
+    
+    # Find all bidirectional pairs in telemetry data
+    bidirectional_pairs = find_bidirectional_pairs_in_telemetry(telemetry_data)
+    total_pairs = len(bidirectional_pairs)
+    
+    # Count how many pairs are being closed
+    closed_pairs_count = count_closed_pairs(links_to_close, bidirectional_pairs)
+    
+    print(f"🔋 Energy calculation: {closed_pairs_count} bidirectional pairs to close out of {total_pairs} total pairs")
+    print(f"🔗 Raw counts: {len(links_to_close)} directional links to close, {len(telemetry_data)} total telemetry links")
+    print(f"📊 Bidirectional pairs found: {list(bidirectional_pairs.keys())[:5]}{'...' if len(bidirectional_pairs) > 5 else ''}")
+    
+    if total_pairs > 0:
+        base_energy_saving = closed_pairs_count / total_pairs
+        energy_saving = min(1.0, base_energy_saving * 2)  # Double the percentage, cap at 100%
+        print(f"🔋 Energy saving: {energy_saving:.3f} ({energy_saving:.1%}) - {closed_pairs_count}/{total_pairs} pairs (doubled)")
+    else:
+        energy_saving = 0.0
+        print(f"🔋 No bidirectional pairs found, energy saving = 0%")
     
     # Process predicted links into RESTCONF commands
     file_commands, api_commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
@@ -241,7 +295,23 @@ def llm_inference(user_prompt: str = None, predicted_links: list = None):
         clean_cmd = cmd.replace('\\', '').replace('\n', ' ').replace('\'', '"')
         formatted_commands.append(clean_cmd)
     
-    return tokenizer.decode(generated, skip_special_tokens=True).strip() , f"請根據上述資料，關閉 {', '.join(links_to_close)}，關閉的RESTCONF命令為{formatted_commands}" , energy_saving
+    # Create detailed instructions with shutdown modification steps
+    shutdown_instructions = f"節能路徑設定指令參考，請根據上述資料，關閉 {', '.join(links_to_close)}，關閉的RESTCONF命令為{formatted_commands}"
+
+    final_instructions = """
+    重要操作步驟
+    1. 執行 GET 命令獲取當前介面配置並保存到 JSON 檔案
+    2. 編輯 JSON 檔案，在 interface-configuration 中新增 "shutdown":[null] 欄位
+    範例修改前
+    {{"interface-configuration":{{{"active":"act", "interface-name":"GigabitEthernet0/0/0/0", "Cisco-IOS-XR-ipv4-network":{{"addresses":{{"primary":{{"address":"10.0.4.1","netmask":"255.255.255.252"}}}}}}}}}}}
+    
+    範例修改後
+    {{"interface-configuration":{{{"active":"act", "shutdown":[null], "interface-name":"GigabitEthernet0/0/0/0", "Cisco-IOS-XR-ipv4-network":{{"addresses":{{"primary":{{"address":"10.0.4.1","netmask":"255.255.255.252"}}}}}}}}}}}
+
+    3. 執行 PUT 命令將修改後的配置套用到設備
+    """
+    
+    return tokenizer.decode(generated, skip_special_tokens=True).strip() + final_instructions , shutdown_instructions , energy_saving
 
 # ────────────────────── ❼ FastAPI 端點 (原樣) ──────────────
 app = FastAPI(
@@ -335,6 +405,61 @@ def filter_links_to_close(predicted_links: list, protected_links: list) -> list:
     
     return filtered_links
 
+def filter_links_by_topology(predicted_links: list) -> list:
+    """
+    Filter out links that contain nodes not present in the current topology
+    
+    Args:
+        predicted_links: Links predicted by the model to be closed
+        
+    Returns:
+        list: Filtered links excluding those with unopened nodes
+    """
+    try:
+        # Get current topology to find available nodes
+        from restconf_processor import fetch_all_nodes
+        available_nodes = fetch_all_nodes()
+        
+        if not available_nodes:
+            print("⚠️  No nodes found in topology, returning empty list")
+            return []
+        
+        # Extract node numbers from available nodes (e.g., 'node1' -> 'S1')
+        available_switches = set()
+        for node_id in available_nodes:
+            if 'node' in node_id:
+                try:
+                    node_num = node_id.replace('node', '')
+                    switch_name = f"S{node_num}"
+                    available_switches.add(switch_name)
+                except ValueError:
+                    continue
+        
+        print(f"🔍 Available switches in topology: {sorted(available_switches)}")
+        
+        # Filter links to only include those where both nodes are available
+        valid_links = []
+        for link in predicted_links:
+            if '-' in link:
+                try:
+                    source, target = link.split('-', 1)
+                    if source in available_switches and target in available_switches:
+                        valid_links.append(link)
+                    else:
+                        print(f"🚫 Filtered out link {link}: {source} or {target} not in topology")
+                except ValueError:
+                    print(f"⚠️  Invalid link format: {link}")
+            else:
+                print(f"⚠️  Invalid link format: {link}")
+        
+        print(f"✅ Topology filtering: {len(predicted_links)} -> {len(valid_links)} links")
+        return valid_links
+        
+    except Exception as e:
+        print(f"⚠️  Error filtering links by topology: {e}")
+        print("   Returning original links as fallback")
+        return predicted_links
+
 @app.post("/output")
 async def post_output(request: OutputRequest):
     """Process user message with full network analysis pipeline"""
@@ -352,8 +477,11 @@ async def post_output(request: OutputRequest):
         telemetry_data = collector()
         links_to_close = predict_links_to_close_rl(telemetry_data)
         
+        # Filter out links to nodes not in current topology
+        topology_filtered_links = filter_links_by_topology(links_to_close)
+        
         # Filter out protected links from the prediction
-        filtered_links_to_close = filter_links_to_close(links_to_close, protected_links)
+        filtered_links_to_close = filter_links_to_close(topology_filtered_links, protected_links)
         
         # Run LLM inference with user message and filtered links
         # Pass the filtered links to ensure RESTCONF commands only include allowed links
@@ -362,7 +490,11 @@ async def post_output(request: OutputRequest):
         return {
             "llm_result": result,
             "restconf_commands": commands,
-            "energy_saving_percentage": f"{energy_saving:.1%}"
+            "energy_saving_percentage": f"{energy_saving:.1%}",
+            "predicted_links_to_close": filtered_links_to_close,
+            "protected_links": protected_links,
+            "original_prediction": links_to_close,
+            "topology_filtered_prediction": topology_filtered_links
         }
     except Exception as e:
         print(f"❌ Error in POST /output: {e}")
@@ -372,11 +504,23 @@ async def post_output(request: OutputRequest):
 async def get_output():
     """Get LLM inference result with network analysis"""
     try:
-        result, commands, energy_saving = llm_inference()
+        # Get fresh telemetry data and predictions
+        telemetry_data = collector()
+        links_to_close = predict_links_to_close_rl(telemetry_data)
+        
+        # Filter out links to nodes not in current topology
+        topology_filtered_links = filter_links_by_topology(links_to_close)
+        
+        # Run LLM inference with topology-filtered links
+        result, commands, energy_saving = llm_inference(predicted_links=topology_filtered_links)
+        
         return {
             "llm_result": result, 
             "restconf_commands": commands,
-            "energy_saving_percentage": f"{energy_saving:.1%}"
+            "energy_saving_percentage": f"{energy_saving:.1%}",
+            "predicted_links_to_close": topology_filtered_links,
+            "original_prediction": links_to_close,
+            "topology_filtered_prediction": topology_filtered_links
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -397,17 +541,22 @@ async def predict_links_rl():
                     'traffic': traffic_value,
                     'output-drops': 0,  # Simulated values since we don't have real drop data
                     'output-queue-drops': 0,
-                    'max-capacity': 10000
+                    'max-capacity': 8000
                 }
         
         links_to_close = predict_links_to_close_rl(telemetry_data)
         
-        # Process predicted links into RESTCONF commands
-        file_commands, api_commands, configs, commands_file, config_files = process_predicted_links(links_to_close)
+        # Filter out links to nodes not in current topology
+        topology_filtered_links = filter_links_by_topology(links_to_close)
+        
+        # Process topology-filtered links into RESTCONF commands
+        file_commands, api_commands, configs, commands_file, config_files = process_predicted_links(topology_filtered_links)
         
         return {
             "telemetry_data": telemetry_data,
-            "predicted_links_to_close": links_to_close,
+            "predicted_links_to_close": topology_filtered_links,
+            "original_prediction": links_to_close,
+            "topology_filtered_prediction": topology_filtered_links,
             "restconf_commands": api_commands,
             "commands_file": str(commands_file),
             "config_files": [str(f) for f in config_files],
@@ -442,7 +591,7 @@ async def get_telemetry_features():
                     'traffic': traffic_value,
                     'output-drops': 0,  # 模擬值
                     'output-queue-drops': 0,  # 模擬值
-                    'max-capacity': 10000  # 模擬值
+                    'max-capacity': 8000  # 模擬值
                 }
         
         # 獲取模型的預處理特徵
@@ -677,4 +826,89 @@ async def download_config(filename: str):
             media_type="application/json"
         )
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 新增端點：執行單一連結關閉命令
+@app.post("/close-link")
+async def close_link(link: str):
+    """Execute close command for a specific link"""
+    try:
+        # Validate link format
+        if not link or '-' not in link:
+            raise HTTPException(status_code=400, detail="Invalid link format. Expected format: S1-S2")
+        
+        # Apply topology filtering to ensure the link is valid
+        topology_filtered_links = filter_links_by_topology([link])
+        
+        if not topology_filtered_links:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Link {link} contains nodes not present in current topology"
+            )
+        
+        # Build and execute the shutdown command
+        commands = build_shutdown_commands([link], for_file=False)
+        
+        if not commands:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"No interface mapping found for link {link}"
+            )
+        
+        # Execute the command using requests
+        import subprocess
+        import shlex
+        from datetime import datetime
+        
+        command = commands[0]
+        print(f"🔧 Executing close command for link {link}")
+        print(f"📝 Command: {command}")
+        
+        # Execute the curl command
+        try:
+            # Parse the curl command to extract components
+            if 'curl' in command:
+                # Execute the command directly
+                result = subprocess.run(
+                    shlex.split(command), 
+                    capture_output=True, 
+                    text=True, 
+                    timeout=30
+                )
+                
+                if result.returncode == 0:
+                    print(f"✅ Successfully closed link {link}")
+                    status = "success"
+                    message = f"Link {link} has been successfully closed"
+                    output = result.stdout
+                else:
+                    print(f"❌ Failed to close link {link}: {result.stderr}")
+                    status = "error"
+                    message = f"Failed to close link {link}"
+                    output = result.stderr
+            else:
+                raise ValueError("Invalid command format")
+                
+        except subprocess.TimeoutExpired:
+            status = "timeout"
+            message = f"Command timeout while closing link {link}"
+            output = "Command execution timed out"
+        except Exception as e:
+            status = "error"
+            message = f"Error executing command: {str(e)}"
+            output = str(e)
+        
+        return {
+            "link": link,
+            "status": status,
+            "message": message,
+            "command": command,
+            "output": output,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in close-link endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))

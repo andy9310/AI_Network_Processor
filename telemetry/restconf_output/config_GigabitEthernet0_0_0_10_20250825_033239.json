@@ -1,0 +1,17 @@
+{
+  "interface-configuration": [
+    {
+      "active": "act",
+      "interface-name": "GigabitEthernet0/0/0/10",
+      "Cisco-IOS-XR-ipv4-io-cfg:ipv4-network": {
+        "addresses": {
+          "primary": {
+            "address": "10.0.4.37",
+            "netmask": "255.255.255.252"
+          }
+        }
+      },
+      "shutdown": null
+    }
+  ]
+}
